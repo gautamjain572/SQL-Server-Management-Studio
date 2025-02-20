@@ -1,4 +1,4 @@
-create database BankApp
+﻿create database BankApp
 
 CREATE TABLE BankDetails (
     BankID INT PRIMARY KEY IDENTITY(1,1),
@@ -269,4 +269,246 @@ BEGIN
     ORDER BY CreatedDate DESC;  -- Latest accounts first  
 END;
 EXEC GetAllAccountHolders;
+
+
+CREATE PROCEDURE WithdrawAmount
+(
+    @ATMCardNumber VARCHAR(20),
+    @CVV INT,
+    @ATMPin CHAR(4),
+    @WithdrawalAmount DECIMAL(18,2),
+    -- Output parameters to return status
+    @isWithdrawalSuccessful BIT OUTPUT,
+    @withdrawalStatusMessage VARCHAR(400) OUTPUT
+)
+AS
+BEGIN
+    SET @isWithdrawalSuccessful = 0;
+    SET @withdrawalStatusMessage = 'Something went wrong. Please try again.';
+    -- Check if the ATM card details are valid
+    IF NOT EXISTS (
+        SELECT 1 FROM AccountHolderDetails 
+        WHERE ATMCardNumber = @ATMCardNumber AND CVV = @CVV AND ATMPin = @ATMPin
+    )
+    BEGIN
+        SET @withdrawalStatusMessage = 'Invalid ATM details. Please check your ATM Card Number, CVV, or PIN.';
+        RETURN;
+    END
+    -- Check if sufficient balance is available
+    DECLARE @CurrentBalance DECIMAL(18,2);
+    SELECT @CurrentBalance = Balance 
+    FROM AccountHolderDetails 
+    WHERE ATMCardNumber = @ATMCardNumber;
+    IF @CurrentBalance < @WithdrawalAmount
+    BEGIN
+        SET @withdrawalStatusMessage = 'Insufficient balance. Withdrawal failed.';
+        RETURN;
+    END
+    -- Deduct the withdrawal amount from the balance
+    UPDATE AccountHolderDetails
+    SET Balance = Balance - @WithdrawalAmount
+    WHERE ATMCardNumber = @ATMCardNumber;
+    -- Check if the update was successful
+    IF @@ROWCOUNT > 0
+    BEGIN
+        SET @isWithdrawalSuccessful = 1;
+        SET @withdrawalStatusMessage = CONCAT('Withdrawal of ', @WithdrawalAmount, ' successful. Remaining balance: ', @CurrentBalance - @WithdrawalAmount);
+    END
+END;
+DECLARE @isWithdrawalSuccessful BIT, @withdrawalStatusMessage VARCHAR(400);
+EXEC WithdrawAmount  
+    @ATMCardNumber = '4000123412341234',  
+    @CVV = 123,  
+    @ATMPin = '1234',  
+    @WithdrawalAmount = 5000,  
+    @isWithdrawalSuccessful = @isWithdrawalSuccessful OUTPUT,  
+    @withdrawalStatusMessage = @withdrawalStatusMessage OUTPUT;  
+SELECT @isWithdrawalSuccessful AS IsWithdrawalSuccessful, @withdrawalStatusMessage AS StatusMessage;
+
+
+alter PROCEDURE DepositAmount
+(
+    @AccountNumber VARCHAR(50),
+    @AccountHolderName VARCHAR(255),
+    @DepositAmount DECIMAL(18,2), 
+    -- Output parameters
+    @isDepositSuccessful BIT OUTPUT,
+    @depositStatusMessage VARCHAR(400) OUTPUT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Default response values
+    SET @isDepositSuccessful = 0;
+    SET @depositStatusMessage = 'Something went wrong. Please try again.';
+    -- Validate account existence
+    IF NOT EXISTS (
+        SELECT 1 FROM AccountHolderDetails 
+        WHERE AccountNumber = @AccountNumber AND AccountHolderName = @AccountHolderName
+    )
+    BEGIN
+        SET @depositStatusMessage = 'Invalid Account Number or Account Holder Name.';
+        RETURN;
+    END
+
+    -- Ensure deposit amount is greater than ₹100
+    IF @DepositAmount IS NULL OR @DepositAmount <= 100
+    BEGIN
+        SET @depositStatusMessage = 'Invalid deposit amount. It must be greater than ₹100.';
+        RETURN;
+    END
+    -- Update balance
+    UPDATE AccountHolderDetails
+    SET Balance = Balance + @DepositAmount
+    WHERE AccountNumber = @AccountNumber;
+    -- Check if the update was successful
+    IF @@ROWCOUNT > 0
+    BEGIN
+        SET @isDepositSuccessful = 1;
+        SET @depositStatusMessage = 'Deposit successful.';
+    END
+END;
+DECLARE @isDepositSuccessful BIT, @depositStatusMessage VARCHAR(400);
+EXEC DepositAmount  
+    @AccountNumber = '123456789012',  
+    @AccountHolderName = 'John Doe',  
+    @DepositAmount = 5000,  
+    @isDepositSuccessful = @isDepositSuccessful OUTPUT,  
+    @depositStatusMessage = @depositStatusMessage OUTPUT;  
+SELECT @isDepositSuccessful AS IsDepositSuccessful, @depositStatusMessage AS StatusMessage;
+
+CREATE PROCEDURE UpdateAccountHolderDetails
+(
+    @AccountID INT,
+    @AccountHolderName VARCHAR(255),
+    @Gender VARCHAR(10),
+    @AccountNumber VARCHAR(50),
+    @BankID INT,
+    @PANCard VARCHAR(10),
+    @AadharCard VARCHAR(12),
+    @ATMCardNumber VARCHAR(20),
+    @CVV INT,
+    @ATMPin CHAR(4),
+    @PhoneNumber VARCHAR(20),
+    @Email VARCHAR(255),
+    @Address VARCHAR(500),
+
+    -- Output parameters
+    @isUpdateSuccessful BIT OUTPUT,
+    @updateStatusMessage VARCHAR(400) OUTPUT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Default response values
+    SET @isUpdateSuccessful = 0;
+    SET @updateStatusMessage = 'Something went wrong. Please try again.';
+
+    -- Check if the account exists
+    IF NOT EXISTS (SELECT 1 FROM AccountHolderDetails WHERE AccountID = @AccountID)
+    BEGIN
+        SET @updateStatusMessage = 'Invalid Account ID.';
+        RETURN;
+    END
+    -- Validate Gender
+    IF @Gender NOT IN ('Male', 'Female', 'Other')
+    BEGIN
+        SET @updateStatusMessage = 'Invalid gender. It must be Male, Female, or Other.';
+        RETURN;
+    END
+    -- Validate Bank ID
+    IF NOT EXISTS (SELECT 1 FROM BankDetails WHERE BankID = @BankID)
+    BEGIN
+        SET @updateStatusMessage = 'Invalid Bank ID.';
+        RETURN;
+    END
+    -- Validate Unique Constraints
+    IF EXISTS (SELECT 1 FROM AccountHolderDetails WHERE AccountNumber = @AccountNumber AND AccountID <> @AccountID)
+    BEGIN
+        SET @updateStatusMessage = 'Account Number already exists.';
+        RETURN;
+    END
+    IF EXISTS (SELECT 1 FROM AccountHolderDetails WHERE PANCard = @PANCard AND AccountID <> @AccountID)
+    BEGIN
+        SET @updateStatusMessage = 'PAN Card already exists.';
+        RETURN;
+    END
+    IF EXISTS (SELECT 1 FROM AccountHolderDetails WHERE AadharCard = @AadharCard AND AccountID <> @AccountID)
+    BEGIN
+        SET @updateStatusMessage = 'Aadhar Card already exists.';
+        RETURN;
+    END
+    IF EXISTS (SELECT 1 FROM AccountHolderDetails WHERE ATMCardNumber = @ATMCardNumber AND AccountID <> @AccountID)
+    BEGIN
+        SET @updateStatusMessage = 'ATM Card Number already exists.';
+        RETURN;
+    END
+    IF EXISTS (SELECT 1 FROM AccountHolderDetails WHERE PhoneNumber = @PhoneNumber AND AccountID <> @AccountID)
+    BEGIN
+        SET @updateStatusMessage = 'Phone Number already exists.';
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM AccountHolderDetails WHERE Email = @Email AND AccountID <> @AccountID)
+    BEGIN
+        SET @updateStatusMessage = 'Email already exists.';
+        RETURN;
+    END
+    -- Validate CVV
+    IF @CVV < 100 OR @CVV > 999
+    BEGIN
+        SET @updateStatusMessage = 'Invalid CVV. It must be a 3-digit number.';
+        RETURN;
+    END
+    -- Update the AccountHolderDetails table
+    UPDATE AccountHolderDetails
+    SET 
+        AccountHolderName = @AccountHolderName,
+        Gender = @Gender,
+        AccountNumber = @AccountNumber,
+        BankID = @BankID,
+        PANCard = @PANCard,
+        AadharCard = @AadharCard,
+        ATMCardNumber = @ATMCardNumber,
+        CVV = @CVV,
+        ATMPin = @ATMPin,
+        PhoneNumber = @PhoneNumber,
+        Email = @Email,
+        Address = @Address
+    WHERE AccountID = @AccountID;
+    -- Check if update was successful
+    IF @@ROWCOUNT > 0
+    BEGIN
+        SET @isUpdateSuccessful = 1;
+        SET @updateStatusMessage = 'Account details updated successfully.';
+    END
+END;
+DECLARE @isUpdateSuccessful BIT, @updateStatusMessage VARCHAR(400);
+EXEC UpdateAccountHolderDetails  
+    @AccountID = 8,  
+    @AccountHolderName = 'John Doe',  
+    @Gender = 'Male',  
+    @AccountNumber = 'ACC123456789',  
+    @BankID = 2,  
+    @PANCard = '',  
+    @AadharCard = '',  
+    @ATMCardNumber = '',  
+    @CVV = 456,  
+    @ATMPin = '',  
+    @PhoneNumber = '',  
+    @Email = 'john.doe@.com',  
+    @Address = '123 Main Street, NY',  
+    @isUpdateSuccessful = @isUpdateSuccessful OUTPUT,  
+    @updateStatusMessage = @updateStatusMessage OUTPUT;  
+SELECT @isUpdateSuccessful AS IsUpdateSuccessful, @updateStatusMessage AS StatusMessage;
+
+
+
+select * from BankDetails
+select * from AccountHolderDetails
+
+
+
+
+
 
